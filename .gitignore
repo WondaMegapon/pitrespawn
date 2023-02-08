@@ -1,0 +1,5 @@
+# Getting rid of the reference folder.
+ref/
+obj/
+bin/
+.vs/
