@@ -9,9 +9,9 @@ using UnityEngine;
 
 namespace pitrespawn
 {
-    [BepInPlugin("com.wonda.pitrespawn", "PitRespawn", "0.0.1")]
+    [BepInPlugin("com.wonda.pitrespawn", "PitRespawn", "1.1.0")]
     public class PitRespawn : BaseUnityPlugin
-    {   
+    {
         // Our variables.
         // Storing a protected entity.
         private UpdatableAndDeletable respawnStorage = null;
@@ -21,9 +21,16 @@ namespace pitrespawn
         private int failScale = 0;
 
 
-        // Standard mod stuff. Enabling our hooks if the mod is online.
-        // ~~Really want hotloading for DLLs, Devs.~~
+        // Hooking into the ModsInit option.
         public void OnEnable() {
+            On.RainWorld.OnModsInit += SetupHooks;
+        }
+
+        // Setting up our hooks.
+        public void SetupHooks(On.RainWorld.orig_OnModsInit orig, RainWorld self)
+        {
+            orig(self);
+            MachineConnector.SetRegisteredOI("wonda_pitrespawn", new PitRespawnOptions());
             On.Creature.Die += Creature_Die;
             On.RainWorldGame.GameOver += RainWorldGame_GameOver;
             On.UpdatableAndDeletable.Destroy += UpdatableAndDeletable_Destroy;
@@ -108,6 +115,12 @@ namespace pitrespawn
             if(num == -1) num = self.room.abstractRoom.ExitIndex(RXRandom.Int(self.room.abstractRoom.exits));
             // Setting the Realized position of the items.
             Vector2 shortcutPosition = new Vector2(self.room.LocalCoordinateOfNode(num).x * 20f, self.room.LocalCoordinateOfNode(num).y * 20f);
+
+            // Reset the player's momemntum so they don't die from fall damage.
+            for(var i = 0; i < self.bodyChunks.Length; i++)
+            {
+                self.bodyChunks[i].vel = Vector2.zero;
+            }
 
             // Hard-setting the new player position.
             self.SuperHardSetPosition(shortcutPosition);
