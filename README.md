@@ -7,7 +7,7 @@ Issues are tracked on [Github](https://github.com/WondaMegapon/pitrespawn/issues
 # Contact
 The [Github](https://github.com/WondaMegapon/pitrespawn/issues) is the best place to leave any issues or suggestions. 
 However, if you have any general feedback, feel free to message me on Discord. 
-You can find me at Wonda#2183 in the modding server.
+You can find me in the modding server.
 
 # Credits
 Thanks to SchuhBaum for the OptionsInterface code.
