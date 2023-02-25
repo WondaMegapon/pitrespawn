@@ -16,13 +16,13 @@ using UnityEngine;
 
 namespace pitrespawn
 {
-    [BepInPlugin("com.wonda.pitrespawn", "PitRespawn", "1.2.0")]
+    [BepInPlugin("com.wonda.pitrespawn", "PitRespawn", "1.2.1")]
     public class PitRespawn : BaseUnityPlugin
     {
         // Metadata (Idea stolen from Schbaum)
         public static readonly string MOD_ID = "com.wonda.pitrespawn";
         public static readonly string author = "Wonda";
-        public static readonly string version = "1.2.0";
+        public static readonly string version = "1.2.1";
 
         // Our variables.
         // A player storage variable to keep an eye on every slugcat.
@@ -38,13 +38,15 @@ namespace pitrespawn
             // The last room the player was in.
             public int lastRoom = -1;
             // The player's penalty for falling again.
-            public int failScale = 0;
+            public int failScale = PitRespawnOptions.FallPenalty.Value;
+            // The player's held items when they fall.
+            public List<AbstractPhysicalObject> heldObjects = new List<AbstractPhysicalObject>();
         }
         // Storing our players to keep an eye on.
         private List<PlayerStorage> playerStorage = new List<PlayerStorage>();
 
         // Storing an entity that we'll respawn.
-        private UpdatableAndDeletable currentlyRespawningEntity = null;
+        private List<UpdatableAndDeletable> currentlyRespawningEntities = new List<UpdatableAndDeletable>();
         // Storing the game for easy access. ;)
         private RainWorldGame currentGame;
 
@@ -100,7 +102,7 @@ namespace pitrespawn
         private void Player_ctor(On.Player.orig_ctor orig, Player self, AbstractCreature abstractCreature, World world)
         {
             orig(self, abstractCreature, world);
-            Logger.LogInfo("Player " + self.playerState.playerNumber + " Initalized.");
+            Logger.LogDebug("Player " + self.playerState.playerNumber + " Initalized.");
             playerStorage.Add(new PlayerStorage(self));
         }
 
@@ -108,49 +110,53 @@ namespace pitrespawn
         private void AbstractCreature_Move(On.AbstractCreature.orig_Move orig, AbstractCreature self, WorldCoordinate newCoord)
         {
             // Checking to see if the entity was realized.
-            if (self.realizedCreature != null && self.realizedCreature.lastCoord != newCoord)
+            if (self.realizedCreature != null && self.realizedCreature.lastCoord != null && self.realizedCreature.lastCoord != newCoord && currentGame.world.GetAbstractRoom(self.realizedCreature.lastCoord) != null && currentGame.world.GetAbstractRoom(newCoord) != null)
             {
-                Logger.LogInfo(self.creatureTemplate.name + " of " + self.realizedCreature.GetType() + " moved to " + currentGame.world.GetAbstractRoom(newCoord).index);
+                Logger.LogDebug(self.creatureTemplate.name + " of " + self.realizedCreature.GetType() + " moved from " + currentGame.world.GetAbstractRoom(self.realizedCreature.lastCoord).name + " to " + currentGame.world.GetAbstractRoom(newCoord).name);
 
                 // Checking to see if the entity was a player.
                 if (self.realizedCreature is Player)
-                {
+                { 
+
                     // Lil' helper variable.
                     Player target = (Player)self.realizedCreature;
                     // Checking to see if the player has entered the same room
-                    if (playerStorage.Find(x => x.player == target).lastRoom == currentGame.world.GetAbstractRoom(self.pos).index) return;
+                    if (playerStorage.Find(x => x.player == target).lastRoom == currentGame.world.GetAbstractRoom(self.realizedCreature.lastCoord).index) return;
 
                     // Assigning the relevant player's last room to their current room.
-                    playerStorage.Find(x => x.player == target).lastRoom = currentGame.world.GetAbstractRoom(self.pos).index;
+                    playerStorage.Find(x => x.player == target).lastRoom = currentGame.world.GetAbstractRoom(self.realizedCreature.lastCoord).index;
                     // Debugging.
-                    Logger.LogInfo("Player " + target.playerState.playerNumber + " has last room of " + playerStorage.Find(x => x.player == target).lastRoom + " and is moving to " + currentGame.world.GetAbstractRoom(newCoord).index + ".");
+                    Logger.LogDebug("Player " + target.playerState.playerNumber + " has last room of " + currentGame.world.GetAbstractRoom(playerStorage.Find(x => x.player == target).lastRoom).name + " and is moving to " + currentGame.world.GetAbstractRoom(newCoord).name + ".");
                 }
             }
+
             orig(self, newCoord);
         }
 
         // Catching a player's death and respawning them if it is just a fall.
         private void Player_Die(On.Player.orig_Die orig, Player self)
         {
-            Logger.LogInfo("Player " + self.playerState.playerNumber + " has died! Why?");
+            Logger.LogDebug("Player " + self.playerState.playerNumber + " has died! Why?");
 
             int subtractedFoodAmount = PitRespawnOptions.ScalingPenalty.Value ? playerStorage.Find(x => x.player == self).failScale : PitRespawnOptions.FallPenalty.Value;
 
             if (PitRespawnOptions.PlayerRespawn.Value && !self.dead && IsBelowDeathPlane(self) && self.FoodInStomach >= 1 && (PitRespawnOptions.SecondChance.Value || subtractedFoodAmount <= self.FoodInStomach))
             {
-                Logger.LogInfo("Player died from falling and has food to spare. Attempting respawn.");
-                MovePlayerToPreviousExit(self);
+                Logger.LogDebug("Player died from falling and has food to spare. Attempting respawn.");
+                MoveCreatureToPreviousNode(self);
                 self.SubtractFood(Math.Min(subtractedFoodAmount, self.FoodInStomach));
                 return;
             }
-            if (self == currentlyRespawningEntity) return;
+            if (currentlyRespawningEntities.Contains(self)) return;
+
+            Logger.LogDebug("Killing the player anyways.");
             orig(self);
         }
 
         // Also catching permadies.
         private void Player_PermaDie(On.Player.orig_PermaDie orig, Player self)
         {
-            if (PitRespawnOptions.PlayerRespawn.Value && self == currentlyRespawningEntity)
+            if (PitRespawnOptions.PlayerRespawn.Value && currentlyRespawningEntities.Contains(self))
             {
                 //currentlyRespawningEntity = null;
                 return;
@@ -161,9 +167,9 @@ namespace pitrespawn
         // Just a copy to catch any issue with multiplayer.
         private void Player_Destroy(On.Player.orig_Destroy orig, Player self)
         {
-            if (PitRespawnOptions.PlayerRespawn.Value && self == currentlyRespawningEntity)
+            if (PitRespawnOptions.PlayerRespawn.Value && currentlyRespawningEntities.Contains(self))
             {
-                currentlyRespawningEntity = null;
+                currentlyRespawningEntities.Remove(self);
                 return;
             };
             orig(self);
@@ -179,16 +185,16 @@ namespace pitrespawn
                 MoveCreatureToPreviousNode(self);
             }
 
-            if (self == currentlyRespawningEntity) return;
+            if (currentlyRespawningEntities.Contains(self)) return;
             orig(self);
         }
 
         // The last bit, to catch when a creature we saved is slated for deletion.
         private void UpdatableAndDeletable_Destroy(On.UpdatableAndDeletable.orig_Destroy orig, UpdatableAndDeletable self)
         {
-            if (self == currentlyRespawningEntity)
+            if (currentlyRespawningEntities.Contains(self))
             {
-                currentlyRespawningEntity = null;
+                currentlyRespawningEntities.Remove(self);
                 return;
             };
             orig(self);
@@ -198,7 +204,7 @@ namespace pitrespawn
         // Checking to see if the creature is below the death plane.
         private bool IsBelowDeathPlane(Creature self)
         {
-            Logger.LogInfo("Checking for below death plane");
+            Logger.LogDebug("Checking for below death plane");
 
             return (self.mainBodyChunk.pos.y < 0f &&
                 (!self.room.water || self.room.waterInverted || self.room.defaultWaterLevel < -10) &&
@@ -211,62 +217,76 @@ namespace pitrespawn
             // Grabbing the player's previous room node.
             int num = player.room.abstractRoom.ExitIndex(playerStorage.Find(x => x.player == player).lastRoom);
 
-            Logger.LogInfo("Player's last pipe had an index of " + num);
+            Logger.LogDebug("Player's last pipe had an index of " + num);
 
             // If the exit is invalid, we'll just grab a random node in the room.
-            if (num == -1) return player.room.abstractRoom.RandomNodeInRoom();
+            if (num == -1) return player.room.LocalCoordinateOfNode(player.room.abstractRoom.ExitIndex(player.room.abstractRoom.connections[UnityEngine.Random.Range(0, player.room.abstractRoom.connections.Length)]));
 
             // If the exit is valid, then we'll return the exit we grabbed.
             return player.room.LocalCoordinateOfNode(num);
         }
 
-        // Sending the player to the last exit they were at.
-        private void MovePlayerToPreviousExit(Player self)
-        {
-            // Getting the cordinates of the player's last pipe.
-            WorldCoordinate shortcutCordinate = GetPlayersLastPipe(self);
-
-            // Setting the Realized position of the player.
-            Vector2 shortcutPosition = new Vector2(shortcutCordinate.x * 20f, shortcutCordinate.y * 20f);
-
-            Logger.LogInfo("Player's last pipe was at (" + shortcutPosition.x + "f, " + shortcutPosition.y + "f).");
-
-            // Reset the player's momemntum so they don't die from fall damage.
-            for (var i = 0; i < self.bodyChunks.Length; i++)
-            {
-                self.bodyChunks[i].vel = Vector2.zero;
-            }
-
-            // Hard-setting the new player position.
-            self.SuperHardSetPosition(shortcutPosition);
-
-            // Incrementing the fail scale.
-            playerStorage.Find(x => x.player == self).failScale++;
-
-            // Adding the player to the storage.
-            currentlyRespawningEntity = self;
-        }
-
         // For future support of other creatures surviving falls.
         private void MoveCreatureToPreviousNode(Creature self)
         {
-            // Getting the cordinates of a random pipe.
-            WorldCoordinate shortcutCordinate = self.room.LocalCoordinateOfNode(self.room.abstractRoom.ExitIndex(self.room.abstractRoom.connections[UnityEngine.Random.Range(0, self.room.abstractRoom.connections.Length)]));
-
-            // Setting the Realized position of the creature.
-            Vector2 shortcutPosition = new Vector2(shortcutCordinate.x * 20f, shortcutCordinate.y * 20f);
-
-            Logger.LogInfo("Creature's last pipe was at (" + shortcutPosition.x + "f, " + shortcutPosition.y + "f). In " + self.room.abstractRoom.name + ".");
-
-            // Moving the creature and setting their velocity.
-            for (var i = 0; i < self.bodyChunks.Length; i++)
+            // Prepping our coordinates.
+            WorldCoordinate shortcutCordinate;
+            if (self is Player)
             {
-                self.bodyChunks[i].vel = Vector2.zero;
-                self.bodyChunks[i].pos = shortcutPosition;
+                // If the creature is a player, we send them to their last pipe.
+                shortcutCordinate = GetPlayersLastPipe((Player)self);
+            } else
+            {
+                // Otherwise we just send them to a random node.
+                shortcutCordinate = self.room.LocalCoordinateOfNode(self.room.abstractRoom.ExitIndex(self.room.abstractRoom.connections[UnityEngine.Random.Range(0, self.room.abstractRoom.connections.Length)]));
             }
 
-            // Adding the player to the storage.
-            currentlyRespawningEntity = self;
+            Logger.LogDebug(self.Template.name + "'s last pipe was at (" + shortcutCordinate.x + ", " + shortcutCordinate.y + "). In " + self.room.abstractRoom.name + ".");
+
+            // Storing every item that the creature had.
+            List<PhysicalObject> graspStorage = new List<PhysicalObject>();
+
+            // Iterating over every grasped item and adding them to our item storage.
+            if(self.grasps != null && self.grasps.Length > 0)
+            {
+                foreach (Creature.Grasp grasp in self.grasps)
+                {
+                    if (grasp != null && grasp.grabbed != null)
+                    {
+                        graspStorage.Add(grasp.grabbed);
+                        //currentlyRespawningEntities.Add(grasp.grabbed);
+                    }
+                }
+            }
+
+            // Causing the creature to lose all grasps.
+            self.LoseAllGrasps();
+
+            // Spitting the player out of the shortcut.
+            self.SpitOutOfShortCut(new RWCustom.IntVector2(shortcutCordinate.x, shortcutCordinate.y), self.room, false);
+
+            // Iterating over every stored item and spawning them at the pipe.
+            for(var i = 0; i < graspStorage.Count; i++)
+            {
+                foreach(BodyChunk chunk in graspStorage[i].bodyChunks)
+                {
+                    chunk.HardSetPosition(new Vector2(shortcutCordinate.x * 20f, shortcutCordinate.y * 20f) + RWCustom.Custom.RNV());
+                    chunk.vel *= 0f;
+                }
+            }
+
+            // If the creature is a player, give them their items back.
+            if (!PitRespawnOptions.DropItemsOnRespawn.Value && self is Player)
+            {
+                foreach (PhysicalObject item in graspStorage)
+                {
+                    if(item != null && (self as Player).FreeHand() != -1)
+                        (self as Player).SlugcatGrab(item, (self as Player).FreeHand());
+                }
+            }
+
+            // Adding the creature to the storage.
+            currentlyRespawningEntities.Add(self);
         }
     }
 }

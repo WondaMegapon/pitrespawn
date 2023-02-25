@@ -9,24 +9,28 @@ namespace pitrespawn
     internal class PitRespawnOptions : OptionInterface
     {
         // Our settings.
+        public static Configurable<bool> PlayerRespawn = new Configurable<bool>(true);
+        public static Configurable<bool> CreatureRespawn = new Configurable<bool>(false);
+
         public static Configurable<bool> ScalingPenalty = new Configurable<bool>(false);
         public static Configurable<bool> SecondChance = new Configurable<bool>(true);
         public static Configurable<int> FallPenalty = new Configurable<int>(1);
 
-        public static Configurable<bool> PlayerRespawn = new Configurable<bool>(true);
-        public static Configurable<bool> CreatureRespawn = new Configurable<bool>(false);
+        public static Configurable<bool> DropItemsOnRespawn = new Configurable<bool>(true);
 
         // IT TURNS OUT THIS IS REQUIRED
         // DON'T MAKE MY MISTAKES!
         public PitRespawnOptions()
         {
             // Binding and assigning.
+            PlayerRespawn = config.Bind("playerRespawn", true, new ConfigurableInfo("Allows players to respawn when falling into pits.", tags: "Player Respawn"));
+            CreatureRespawn = config.Bind("creatureRespawn", false, new ConfigurableInfo("Allows creatures to respawn when falling into pits.", tags: "Creature Respawn"));
+
             ScalingPenalty = config.Bind("scalingPenalty", false, new ConfigurableInfo("Allow successive deaths in the same cycle to deal additional pips of damage.", tags: "Scaling Penalty"));
             SecondChance = config.Bind("secondChance", true, new ConfigurableInfo("The player will still respawn if they have less food than the penalty.", tags: "Second Chance"));
             FallPenalty = config.Bind("fallPenalty", 1, new ConfigurableInfo("The amount of food pips that will be deducted when a player falls.", new ConfigAcceptableRange<int>(0, 9), tags: "Fall Penalty"));
 
-            PlayerRespawn = config.Bind("playerRespawn", true, new ConfigurableInfo("Allows players to respawn when falling into pits.", tags: "Player Respawn"));
-            CreatureRespawn = config.Bind("creatureRespawn", false, new ConfigurableInfo("Allows creatures to respawn when falling into pits.", tags: "Creature Respawn"));
+            DropItemsOnRespawn = config.Bind("dropItemsOnRespawn", true, new ConfigurableInfo("Respawning causes the player to drop their items after respawning.", tags: "Drop Items On Respawn"));
         }
 
         // Runs on the initailization of the options menu.
@@ -77,6 +81,12 @@ namespace pitrespawn
             // Scaling and second chance boxes.
             AddCheckBox(ScalingPenalty, (string)ScalingPenalty.info.Tags[0]);
             AddCheckBox(SecondChance, (string)SecondChance.info.Tags[0]);
+            DrawCheckBoxes(ref Tabs[0]);
+
+            AddNewLine(0.5f);
+
+            // More settings!
+            AddCheckBox(DropItemsOnRespawn, (string)DropItemsOnRespawn.info.Tags[0]);
             DrawCheckBoxes(ref Tabs[0]);
 
             // Closing the settings box.
